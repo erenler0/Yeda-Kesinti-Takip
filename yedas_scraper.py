@@ -1,7 +1,7 @@
 """
 yedas_scraper.py
 ------------------
-YEDAŞ Planlı Kesinti Verisi Çekme ve Eşleştirme Modülü (Canlı API Entegreli - ID Dönüştürmeli)
+YEDAŞ Planlı Kesinti Verisi Çekme ve Eşleştirme Modülü (Performans Optimize Versiyon)
 """
 
 import random
@@ -13,10 +13,8 @@ import requests
 # YEDAŞ Canlı API Endpoint'i
 YEDAS_API_URL = "https://www.yedas.com/api/planli-kesinti-harita"
 
-# Standart kesinti tablosu sütunları
 KESINTI_COLUMNS = ["İl", "İlçe", "Mahalle", "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"]
 
-# YEDAŞ Şehir Kodu Haritası (İl bazlı)
 CITY_MAP = {
     "55": "SAMSUN",
     "52": "ORDU",
@@ -25,19 +23,25 @@ CITY_MAP = {
     "57": "SİNOP"
 }
 
-def _normalize_text(x: str) -> str:
-    """Türkçe karakter/boşluk/büyük-küçük harf farklarını yok sayarak karşılaştırma anahtarı üretir."""
-    if x is None:
-        return ""
-    x = str(x).strip().lower()
-    replacements = {"ı": "i", "İ": "i", "ğ": "g", "ü": "u", "ş": "s", "ö": "o", "ç": "c"}
-    for src, tgt in replacements.items():
-        x = x.replace(src, tgt)
-    return x.replace(" ", "")
+def _clean_str_series(series: pd.Series) -> pd.Series:
+    """Pandas Serisi üzerindeki Türkçe karakterleri ve boşlukları tek seferde (vektörel) temizler."""
+    return (
+        series.fillna("")
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .str.replace("ı", "i", regex=False)
+        .str.replace("i̇", "i", regex=False)
+        .str.replace("ğ", "g", regex=False)
+        .str.replace("ü", "u", regex=False)
+        .str.replace("ş", "s", regex=False)
+        .str.replace("ö", "o", regex=False)
+        .str.replace("ç", "c", regex=False)
+        .str.replace(" ", "", regex=False)
+    )
 
 
 def _parse_details_time(details_text: str):
-    """'details' alanı içerisindeki başlangıç ve bitiş tarihlerini ayıklar."""
     baslangic = ""
     bitis = ""
     if not details_text:
@@ -54,7 +58,6 @@ def _parse_details_time(details_text: str):
 
 
 def _fetch_live_data() -> pd.DataFrame:
-    """YEDAŞ API'sinden canlı JSON verisini çeker ve okunaklı hale getirir."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -78,10 +81,8 @@ def _fetch_live_data() -> pd.DataFrame:
             
             if addresses:
                 for addr in addresses:
-                    # İl kodunu şehir adına çevir (örn: 55 -> SAMSUN)
                     city_id = str(addr.get("id_city", "")).strip().zfill(2)
                     il_name = addr.get("city_name") or addr.get("il") or CITY_MAP.get(city_id, city_id)
-
                     ilce_name = addr.get("district_name") or addr.get("ilce") or addr.get("id_district") or ""
                     mah_name = addr.get("mah_name") or addr.get("mahalle") or addr.get("id_mah") or ""
 
@@ -102,54 +103,44 @@ def _fetch_live_data() -> pd.DataFrame:
 
 
 def match_sahalar_with_kesintiler(sahalar_df: pd.DataFrame, kesintiler_df: pd.DataFrame) -> pd.DataFrame:
-    """Kayıtlı sahaları YEDAŞ kesinti verisiyle esnek eşleştirir."""
+    """
+    10K+ Saha Verisinde Bile Işık Hızında Çalışan Vektörel Eşleştirme Modülü.
+    """
     if sahalar_df.empty or kesintiler_df.empty:
         return pd.DataFrame(columns=[
             "Saha ID", "İl", "İlçe", "Mahalle",
             "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"
         ])
 
-    matched_rows = []
+    s = sahalar_df.copy()
+    k = kesintiler_df.copy()
 
-    # Her kayıtlı saha için kesinti listesinde esnek arama yap
-    for _, saha in sahalar_df.iterrows():
-        s_il = _normalize_text(saha["İl"])
-        s_ilce = _normalize_text(saha["İlçe"])
-        s_mah = _normalize_text(saha["Mahalle"])
+    # 1. Temizlenmiş Eşleşme Anahtarları Üret (Vektörel - Çok Hızlı)
+    s["_il_key"] = _clean_str_series(s["İl"])
+    s["_mah_key"] = _clean_str_series(s["Mahalle"])
 
-        for _, kesinti in kesintiler_df.iterrows():
-            k_il = _normalize_text(kesinti["İl"])
-            k_ilce = _normalize_text(kesinti["İlçe"])
-            k_mah = _normalize_text(kesinti["Mahalle"])
+    k["_il_key"] = _clean_str_series(k["İl"])
+    k["_mah_key"] = _clean_str_series(k["Mahalle"])
 
-            # 1. İl eşleşiyorsa
-            # 2. İlçe ya isim olarak eşleşiyorsa ya da kesintideki ilce ID'si var ama mahalle tutuyorsa
-            # 3. Mahalle ismi eşleşiyorsa veya kesinti metninde mahalle adı geçiyorsa
-            il_match = (s_il == k_il) or (s_il in k_il) or (k_il in s_il)
-            
-            # İlçe ve mahalle için esnek kontrol
-            ilce_match = (not s_ilce) or (s_ilce == k_ilce) or (s_ilce in k_ilce) or (k_ilce in s_ilce)
-            mah_match = (not s_mah) or (s_mah == k_mah) or (s_mah in k_mah) or (k_mah in s_mah)
+    # 2. Ana Eşleştirme Anahtarı: "İl + Mahalle" (İlçe isim farklılıklarından etkilenmemek için)
+    s["_match_key"] = s["_il_key"] + "___" + s["_mah_key"]
+    k["_match_key"] = k["_il_key"] + "___" + k["_mah_key"]
 
-            if il_match and ilce_match and mah_match:
-                matched_rows.append({
-                    "Saha ID": saha["Saha ID"],
-                    "İl": saha["İl"],
-                    "İlçe": saha["İlçe"],
-                    "Mahalle": saha["Mahalle"],
-                    "Kesinti Başlangıç Saati": kesinti["Kesinti Başlangıç Saati"],
-                    "Kesinti Bitiş Saati": kesinti["Kesinti Bitiş Saati"],
-                    "Açıklama/Nedeni": kesinti["Açıklama/Nedeni"]
-                })
+    # 3. Pandas Inner Join (Hızlı Hashing Algoritması)
+    merged = pd.merge(
+        s,
+        k[["_match_key", "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"]],
+        on="_match_key",
+        how="inner"
+    )
 
-    res_df = pd.DataFrame(matched_rows)
-    if not res_df.empty:
-        return res_df.drop_duplicates().reset_index(drop=True)
+    # 4. Gereksiz sütunları temizle ve döndür
+    output_cols = ["Saha ID", "İl", "İlçe", "Mahalle", "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"]
     
-    return pd.DataFrame(columns=[
-        "Saha ID", "İl", "İlçe", "Mahalle",
-        "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"
-    ])
+    if merged.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    return merged[output_cols].drop_duplicates().reset_index(drop=True)
 
 
 def _generate_demo_data(sahalar_df: pd.DataFrame) -> pd.DataFrame:
