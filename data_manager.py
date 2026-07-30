@@ -119,6 +119,7 @@ def load_sahalar() -> pd.DataFrame:
     if not os.path.exists(SAHA_CSV_PATH):
         return pd.DataFrame(columns=COLUMNS)
     
+    # Doğrudan esnek okuyucuyu kullanıyoruz ki noktalı virgüllü dosyayı da doğru sütunlara bölsün
     return read_flexible_csv(SAHA_CSV_PATH)
 
 
