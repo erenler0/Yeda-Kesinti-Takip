@@ -1,7 +1,7 @@
 """
 yedas_scraper.py
 ------------------
-YEDAŞ Planlı Kesinti Verisi Çekme ve Eşleştirme Modülü (Performans Optimize Versiyon)
+YEDAŞ Planlı Kesinti Verisi Çekme ve Eşleştirme Modülü (Performans & Esnek Eşleştirme Yapılandırılmış)
 """
 
 import random
@@ -13,8 +13,10 @@ import requests
 # YEDAŞ Canlı API Endpoint'i
 YEDAS_API_URL = "https://www.yedas.com/api/planli-kesinti-harita"
 
+# Standart kesinti tablosu sütunları
 KESINTI_COLUMNS = ["İl", "İlçe", "Mahalle", "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"]
 
+# YEDAŞ Şehir Kodu Haritası (İl bazlı)
 CITY_MAP = {
     "55": "SAMSUN",
     "52": "ORDU",
@@ -40,8 +42,19 @@ def _clean_str_series(series: pd.Series) -> pd.Series:
         .str.replace(" ", "", regex=False)
     )
 
+def _normalize_text(x: str) -> str:
+    """Tekil metin temizliği için yedek yardımcı fonksiyon."""
+    if x is None:
+        return ""
+    x = str(x).strip().lower()
+    replacements = {"ı": "i", "i̇": "i", "ğ": "g", "ü": "u", "ş": "s", "ö": "o", "ç": "c"}
+    for src, tgt in replacements.items():
+        x = x.replace(src, tgt)
+    return x.replace(" ", "")
+
 
 def _parse_details_time(details_text: str):
+    """'details' alanı içerisindeki başlangıç ve bitiş tarihlerini ayıklar."""
     baslangic = ""
     bitis = ""
     if not details_text:
@@ -58,6 +71,7 @@ def _parse_details_time(details_text: str):
 
 
 def _fetch_live_data() -> pd.DataFrame:
+    """YEDAŞ API'sinden canlı JSON verisini çeker ve okunaklı hale getirir."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -83,6 +97,7 @@ def _fetch_live_data() -> pd.DataFrame:
                 for addr in addresses:
                     city_id = str(addr.get("id_city", "")).strip().zfill(2)
                     il_name = addr.get("city_name") or addr.get("il") or CITY_MAP.get(city_id, city_id)
+
                     ilce_name = addr.get("district_name") or addr.get("ilce") or addr.get("id_district") or ""
                     mah_name = addr.get("mah_name") or addr.get("mahalle") or addr.get("id_mah") or ""
 
@@ -104,43 +119,91 @@ def _fetch_live_data() -> pd.DataFrame:
 
 def match_sahalar_with_kesintiler(sahalar_df: pd.DataFrame, kesintiler_df: pd.DataFrame) -> pd.DataFrame:
     """
-    10K+ Saha Verisinde Bile Işık Hızında Çalışan Vektörel Eşleştirme Modülü.
+    10K+ Saha Verisinde Bile Donmayan Ultra Hızlı ve Esnek Eşleştirme Modülü.
     """
+    output_cols = ["Saha ID", "İl", "İlçe", "Mahalle", "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"]
+
     if sahalar_df.empty or kesintiler_df.empty:
-        return pd.DataFrame(columns=[
-            "Saha ID", "İl", "İlçe", "Mahalle",
-            "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"
-        ])
+        return pd.DataFrame(columns=output_cols)
 
     s = sahalar_df.copy()
     k = kesintiler_df.copy()
 
-    # 1. Temizlenmiş Eşleşme Anahtarları Üret (Vektörel - Çok Hızlı)
+    # 1. Temizlenmiş Eşleşme Anahtarları Üret (Vektörel - Anında hesaplanır)
     s["_il_key"] = _clean_str_series(s["İl"])
+    s["_ilce_key"] = _clean_str_series(s["İlçe"])
     s["_mah_key"] = _clean_str_series(s["Mahalle"])
 
     k["_il_key"] = _clean_str_series(k["İl"])
+    k["_ilce_key"] = _clean_str_series(k["İlçe"])
     k["_mah_key"] = _clean_str_series(k["Mahalle"])
 
-    # 2. Ana Eşleştirme Anahtarı: "İl + Mahalle" (İlçe isim farklılıklarından etkilenmemek için)
+    # 2. Aşama: Tam Eşleşenleri Pandas Merge İle Işık Hızında Yakala
     s["_match_key"] = s["_il_key"] + "___" + s["_mah_key"]
     k["_match_key"] = k["_il_key"] + "___" + k["_mah_key"]
 
-    # 3. Pandas Inner Join (Hızlı Hashing Algoritması)
-    merged = pd.merge(
+    direct_matches = pd.merge(
         s,
         k[["_match_key", "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"]],
         on="_match_key",
         how="inner"
     )
 
-    # 4. Gereksiz sütunları temizle ve döndür
-    output_cols = ["Saha ID", "İl", "İlçe", "Mahalle", "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"]
+    matched_saha_ids = set(direct_matches["Saha ID"]) if not direct_matches.empty else set()
+
+    # 3. Aşama: Tam Eşleşmeyenler İçin Sadece Aynı İl İçinde Esnek (İç İçe Metin) Arama Yap
+    # (Tüm tabloyu çarpmadığı için 10k sahada bile çökmeyi engeller)
+    matched_rows = []
     
-    if merged.empty:
+    unmatched_s = s[~s["Saha ID"].isin(matched_saha_ids)]
+
+    if not unmatched_s.empty:
+        for il_key, s_group in unmatched_s.groupby("_il_key"):
+            k_group = k[k["_il_key"] == il_key]
+            if k_group.empty:
+                continue
+
+            for _, s_row in s_group.iterrows():
+                s_mah = s_row["_mah_key"]
+                s_ilce = s_row["_ilce_key"]
+
+                if not s_mah:
+                    continue
+
+                # Kısmi mahalle eşleşmesi arama
+                mask_mah = k_group["_mah_key"].str.contains(s_mah, regex=False) | k_group["_mah_key"].apply(lambda x: x in s_mah if x else False)
+                
+                # İlçe kontrolü (İlçe adı boş veya eşleşiyorsa)
+                if s_ilce:
+                    mask_ilce = (k_group["_ilce_key"] == "") | k_group["_ilce_key"].str.contains(s_ilce, regex=False) | k_group["_ilce_key"].apply(lambda x: x in s_ilce if x else False)
+                    k_matches = k_group[mask_mah & mask_ilce]
+                else:
+                    k_matches = k_group[mask_mah]
+
+                if not k_matches.empty:
+                    for _, k_row in k_matches.iterrows():
+                        matched_rows.append({
+                            "Saha ID": s_row["Saha ID"],
+                            "İl": s_row["İl"],
+                            "İlçe": s_row["İlçe"],
+                            "Mahalle": s_row["Mahalle"],
+                            "Kesinti Başlangıç Saati": k_row["Kesinti Başlangıç Saati"],
+                            "Kesinti Bitiş Saati": k_row["Kesinti Bitiş Saati"],
+                            "Açıklama/Nedeni": k_row["Açıklama/Nedeni"]
+                        })
+
+    # Sonuçları Birleştir
+    all_dfs = []
+    if not direct_matches.empty:
+        all_dfs.append(direct_matches[output_cols])
+    if matched_rows:
+        all_dfs.append(pd.DataFrame(matched_rows)[output_cols])
+
+    if not all_dfs:
         return pd.DataFrame(columns=output_cols)
 
-    return merged[output_cols].drop_duplicates().reset_index(drop=True)
+    final_df = pd.concat(all_dfs, ignore_index=True)
+    return final_df.drop_duplicates().reset_index(drop=True)
 
 
 def _generate_demo_data(sahalar_df: pd.DataFrame) -> pd.DataFrame:
