@@ -5,14 +5,15 @@ YEDAŞ Planlı Kesinti Verisi Çekme ve Eşleştirme Modülü (Canlı API Entegr
 """
 
 import random
+import re
 from datetime import datetime, timedelta
 import pandas as pd
 import requests
 
-# Gerçek YEDAŞ Canlı API Endpoint'i
+# YEDAŞ Canlı API Endpoint'i
 YEDAS_API_URL = "https://www.yedas.com/api/planli-kesinti-harita"
 
-# Eşleştirme ve gösterim için standart kesinti tablosu sütunları
+# Standart kesinti tablosu sütunları
 KESINTI_COLUMNS = ["İl", "İlçe", "Mahalle", "Kesinti Başlangıç Saati", "Kesinti Bitiş Saati", "Açıklama/Nedeni"]
 
 
@@ -27,46 +28,82 @@ def _normalize_text(x: str) -> str:
     return x
 
 
+def _parse_details_time(details_text: str):
+    """'details' alanı içerisindeki başlangıç ve bitiş tarihlerini regex ile ayıklar."""
+    baslangic = ""
+    bitis = ""
+    if not details_text:
+        return baslangic, bitis
+
+    # Tarih formatlarını yakala (Örn: 09.08.2026 09:15:00)
+    times = re.findall(r"\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}(?::\d{2})?", details_text)
+    if len(times) >= 2:
+        baslangic = times[0]
+        bitis = times[1]
+    elif len(times) == 1:
+        baslangic = times[0]
+
+    return baslangic, bitis
+
+
 def _fetch_live_data() -> pd.DataFrame:
     """YEDAŞ API'sinden canlı JSON verisini çeker ve DataFrame'e dönüştürür."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*"
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.yedas.com/planli-kesinti"
         }
         resp = requests.get(YEDAS_API_URL, headers=headers, timeout=15)
         resp.raise_for_status()
-        
-        data = resp.json()
-        
-        # Eğer gelen veri bir liste veya iç içe obje ise duruma göre parse et
-        # YEDAŞ verisinde anahtar listesini kontrol et
-        items = data if isinstance(data, list) else data.get("data", data.get("items", []))
-        
-        rows = []
-        for item in items:
-            # API'den gelen alan adlarına göre esnek okuma yap
-            il = item.get("il") or item.get("ilName") or item.get("province") or ""
-            ilce = item.get("ilce") or item.get("ilceName") or item.get("district") or ""
-            mahalle = item.get("mahalle") or item.get("mahalleName") or item.get("neighborhood") or ""
-            baslangic = item.get("baslangicTarihi") or item.get("startDate") or item.get("baslangic") or ""
-            bitis = item.get("bitisTarihi") or item.get("endDate") or item.get("bitis") or ""
-            aciklama = item.get("neden") or item.get("aciklama") or item.get("reason") or ""
 
-            rows.append({
-                "İl": str(il).strip(),
-                "İlçe": str(ilce).strip(),
-                "Mahalle": str(mahalle).strip(),
-                "Kesinti Başlangıç Saati": str(baslangic).strip(),
-                "Kesinti Bitiş Saati": str(bitis).strip(),
-                "Açıklama/Nedeni": str(aciklama).strip(),
-            })
+        res_json = resp.json()
+
+        # Veri nesnesi 'result -> data' altında yer alıyor
+        data_block = res_json.get("result", {}).get("data", [])
+        if not data_block and isinstance(res_json, list):
+            data_block = res_json
+
+        rows = []
+        for item in data_block:
+            title = item.get("title", "")
+            details = item.get("details", "")
+            baslangic, bitis = _parse_details_time(details)
+
+            addresses = item.get("address", [])
+            
+            # Eğer adres listesi varsa her adrese göre satır üret veya ilkini esas al
+            if addresses:
+                for addr in addresses:
+                    il = addr.get("city_name") or addr.get("il") or addr.get("id_city") or ""
+                    ilce = addr.get("district_name") or addr.get("ilce") or addr.get("id_district") or ""
+                    mahalle = addr.get("mah_name") or addr.get("mahalle") or addr.get("id_mah") or ""
+
+                    rows.append({
+                        "İl": str(il).strip(),
+                        "İlçe": str(ilce).strip(),
+                        "Mahalle": str(mahalle).strip(),
+                        "Kesinti Başlangıç Saati": baslangic,
+                        "Kesinti Bitiş Saati": bitis,
+                        "Açıklama/Nedeni": str(title).strip(),
+                    })
+            else:
+                rows.append({
+                    "İl": "",
+                    "İlçe": "",
+                    "Mahalle": "",
+                    "Kesinti Başlangıç Saati": baslangic,
+                    "Kesinti Bitiş Saati": bitis,
+                    "Açıklama/Nedeni": str(title).strip(),
+                })
 
         df = pd.DataFrame(rows, columns=KESINTI_COLUMNS)
+        # Tamamen boş satırları ele
+        df = df.dropna(how="all")
         return df
 
-    except Exception as e:
-        # Ağ hatası veya API uyumsuzluğunda sessizce boş dön (Demo veriye düşer)
+    except Exception:
+        # Canlı çekilemezse boş döner (Sistem Demo veriye düşer)
         return pd.DataFrame(columns=KESINTI_COLUMNS)
 
 
@@ -145,21 +182,19 @@ def filter_by_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
 
     def _parse_dt(val):
         try:
-            return datetime.strptime(str(val), "%d.%m.%Y %H:%M")
+            return datetime.strptime(str(val), "%d.%m.%Y %H:%M:%S")
         except Exception:
             try:
-                # ISO Formatında gelirse (ör: 2026-07-30T09:00:00)
-                return datetime.fromisoformat(str(val))
+                return datetime.strptime(str(val), "%d.%m.%Y %H:%M")
             except Exception:
                 return None
 
     df = df.copy()
     df["_baslangic_dt"] = df["Kesinti Başlangıç Saati"].map(_parse_dt)
-    
-    # Tarih okunamazsa satırı gizlememek için varsayılan tut
+
     valid_dates = df["_baslangic_dt"].notna()
     if valid_dates.any():
         filtered = df[valid_dates & (df["_baslangic_dt"] >= start_limit) & (df["_baslangic_dt"] < end_limit)]
         return filtered.drop(columns=["_baslangic_dt"]).reset_index(drop=True)
-    
+
     return df.drop(columns=["_baslangic_dt"])
