@@ -1,0 +1,111 @@
+Saha ID,İl,İlçe,Mahalle
+TEST101,Samsun,Atakum,Denizevleri
+TEST102,Samsun,Atakum,Mimar Sinan
+TEST103,Samsun,Atakum,Yenimahalle
+TEST104,Samsun,Atakum,Güzelyalı
+TEST105,Samsun,İlkadım,Kılıçdede
+TEST106,Samsun,İlkadım,Hürriyet
+TEST107,Samsun,İlkadım,Adalet
+TEST108,Samsun,İlkadım,Fatih
+TEST109,Samsun,Canik,Karşıyaka
+TEST110,Samsun,Canik,Soğuksu
+TEST111,Samsun,Bafra,Göltepe
+TEST112,Samsun,Bafra,Başkaya
+TEST113,Samsun,Bafra,Fatih
+TEST114,Samsun,Bafra,Altınyaprak
+TEST115,Samsun,Çarşamba,Orta
+TEST116,Samsun,Çarşamba,Sarıcalı
+TEST117,Samsun,Çarşamba,Helvacalı
+TEST118,Samsun,Alaçam,Akbulut
+TEST119,Samsun,Alaçam,Akgüney
+TEST120,Samsun,Alaçam,Yeniköy
+TEST121,Samsun,Salıpazarı,Yayla
+TEST122,Samsun,Salıpazarı,Çağlayan
+TEST123,Samsun,Ladik,Büyükalan
+TEST124,Samsun,Ladik,Gençköy
+TEST125,Samsun,Kavak,Köy
+TEST126,Samsun,Kavak,Köylüler
+TEST127,Samsun,Terme,Fenk
+TEST128,Samsun,Terme,Yalı
+TEST129,Samsun,Vezirköprü,Fazıl Ahmet Paşa
+TEST130,Samsun,Tekkeköy,19 Mayıs
+TEST131,Ordu,Altınordu,Şarkiye
+TEST132,Ordu,Altınordu,Düz Mahalle
+TEST133,Ordu,Altınordu,Subaşı
+TEST134,Ordu,Altınordu,Bucak
+TEST135,Ordu,Altınordu,Bahçelievler
+TEST136,Ordu,Ünye,Kumbaşı
+TEST137,Ordu,Ünye,Atatürk
+TEST138,Ordu,Ünye,Liseler
+TEST139,Ordu,Ünye,Gölevi
+TEST140,Ordu,Fatsa,Mustafa Kemal Paşa
+TEST141,Ordu,Fatsa,Dolunay
+TEST142,Ordu,Fatsa,Kurtuluş
+TEST143,Ordu,Fatsa,Evkaf
+TEST144,Ordu,Perşembe,Düzköy
+TEST145,Ordu,Perşembe,Efirli
+TEST146,Ordu,Kumru,Samur
+TEST147,Ordu,Korgan,Tepealan
+TEST148,Ordu,Gölköy,Güzelyurt
+TEST149,Ordu,Aybastı,Esenli
+TEST150,Ordu,Ulubey,Gündüzlü
+TEST151,Amasya,Merkez,Yüzevler
+TEST152,Amasya,Merkez,Akbilek
+TEST153,Amasya,Merkez,Hacılar Meydanı
+TEST154,Amasya,Merkez,Dere
+TEST155,Amasya,Merkez,Şehirüstü
+TEST156,Amasya,Merkez,Gökmedrese
+TEST157,Amasya,Merkez,Bahçelievler
+TEST158,Amasya,Merzifon,Harmanlar
+TEST159,Amasya,Merzifon,Sofular
+TEST160,Amasya,Merzifon,Gazimahalle
+TEST161,Amasya,Merzifon,Yunus Emre
+TEST162,Amasya,Suluova,Borsa Mahallesi
+TEST163,Amasya,Suluova,Cevizdere
+TEST164,Amasya,Suluova,Hürriyet
+TEST165,Amasya,Taşova,Yeşilirmak
+TEST166,Amasya,Taşova,Doğu Mahallesi
+TEST167,Amasya,Göynücek,Merkez
+TEST168,Amasya,Hamamözü,Arkutbey
+TEST169,Amasya,Merkez,Karasenir
+TEST170,Amasya,Merkez,Kirazlıdere
+TEST171,Sinop,Merkez,Sakarya
+TEST172,Sinop,Merkez,Meydankapı
+TEST173,Sinop,Merkez,Kefevi
+TEST174,Sinop,Merkez,Gelincik
+TEST175,Sinop,Merkez,Kaleyazısı
+TEST176,Sinop,Merkez,Korucuk
+TEST177,Sinop,Boyabat,Camikebir
+TEST178,Sinop,Boyabat,Kumluk
+TEST179,Sinop,Boyabat,Yıldız
+TEST180,Sinop,Gerze,Köşk
+TEST181,Sinop,Gerze,19 Mayıs
+TEST182,Sinop,Gerze,Hamamlı
+TEST183,Sinop,Ayancık,Cevizli
+TEST184,Sinop,Ayancık,Yalı
+TEST185,Sinop,Durağan,Buzluk
+TEST186,Sinop,Türkeli,Güzelyalı
+TEST187,Sinop,Erfelek,Merkez
+TEST188,Sinop,Dikmen,Merkez
+TEST189,Sinop,Merkez,Zeytinlik
+TEST190,Sinop,Merkez,Orduköy
+TEST191,Çorum,Merkez,Ulukavak
+TEST192,Çorum,Merkez,Bahçelievler
+TEST193,Çorum,Merkez,Mimar Sinan
+TEST194,Çorum,Merkez,Yeniyol
+TEST195,Çorum,Merkez,Gülabibey
+TEST196,Çorum,Merkez,Kale
+TEST197,Çorum,Merkez,Çöplü
+TEST198,Çorum,Merkez,Karakeçili
+TEST199,Çorum,Merkez,Akpreş
+TEST200,Çorum,Merkez,Kunduzhan
+TEST201,Çorum,Sungurlu,Akçay
+TEST202,Çorum,Sungurlu,Hacettepe
+TEST203,Çorum,Sungurlu,Fatih
+TEST204,Çorum,Osmancık,Güney
+TEST205,Çorum,Osmancık,Yeni Mahalle
+TEST206,Çorum,Osmancık,Eminettin
+TEST207,Çorum,Alaca,Denizhan
+TEST208,Çorum,Alaca,Günhan
+TEST209,Çorum,İskilip,Meydan
+TEST210,Çorum,İskilip,Kaleboğazı
