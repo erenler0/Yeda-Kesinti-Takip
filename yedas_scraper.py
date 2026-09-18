@@ -1,7 +1,7 @@
 """
 yedas_scraper.py
 ----------------
-YEDAŞ Planlı Kesinti Çekici ve Koordinat Bazlı Eşleştirme Motoru
+YEDAŞ Planlı Kesinti Veri Çekici ve Saha Eşleştirme Motoru
 """
 
 import math
@@ -12,11 +12,11 @@ from datetime import datetime
 def get_kesintiler(sahalar_df: pd.DataFrame = None):
     """
     YEDAŞ kesinti verilerini çeker.
-    app.py 2 değişken beklediği için ikili paket (df, is_demo) döndürür.
+    app.py iki değişken beklediği için (df, is_demo) ikilisi döndürür.
     """
     today_str = datetime.now().strftime("%Y-%m-%d")
 
-    # YEDAŞ verileri için stabil çalışan demo/örnek veri seti
+    # YEDAŞ verileri için örnek / fallback veri seti
     demo_data = [
         {"İl": "SAMSUN", "İlçe": "ATAKUM", "Mahalle": "MİMAR SİNAN MAH.", "Tarih": today_str, "Açıklama/Nedeni": "Şebeke Bakımı", "Latitude": "41.3200", "Longitude": "36.2700"},
         {"İl": "SAMSUN", "İlçe": "İLKADIM", "Mahalle": "KILIÇDEDE MAH.", "Tarih": today_str, "Açıklama/Nedeni": "Tesis Çalışması", "Latitude": "41.2800", "Longitude": "36.3300"},
@@ -26,36 +26,16 @@ def get_kesintiler(sahalar_df: pd.DataFrame = None):
     ]
     
     df = pd.DataFrame(demo_data)
-    # app.py'nin beklediği (kesintiler_df, is_demo) formatı
+    # app.py'nin hatasız unpack edebilmesi için ikili tuple dönülüyor
     return df, True
-
-
-def _estimate_district_from_coords(lat, lon) -> str:
-    """Koordinatlardan ilçe tahmini yapar."""
-    try:
-        lat = float(lat)
-        lon = float(lon)
-        if 41.20 <= lat <= 41.40 and 36.15 <= lon <= 36.40:
-            return "atakum" if lon < 36.28 else "ilkadım"
-        elif 41.40 <= lat <= 41.60 and 35.80 <= lon <= 36.10:
-            return "bafra"
-        elif 41.10 <= lat <= 41.35 and 36.60 <= lon <= 37.10:
-            return "çarşamba"
-        elif 40.80 <= lat <= 41.20 and 35.20 <= lon <= 35.90:
-            return "havza"
-        elif 41.20 <= lat <= 41.30 and 36.40 <= lon <= 36.60:
-            return "tekkeköy"
-    except Exception:
-        pass
-    return ""
 
 
 def match_sahalar_with_kesintiler(sahalar_df: pd.DataFrame, kesintiler_df: pd.DataFrame) -> pd.DataFrame:
     """
     Saha listesi ile YEDAŞ kesintilerini eşleştirir.
-    Saha ID, İlçe eşleşmesi veya genel koordinat uyumuna göre bağlar.
+    Saha ID, İl/İlçe veya koordinat metinlerine göre eşleme kurar.
     """
-    if sahalar_df.empty:
+    if sahalar_df is None or sahalar_df.empty:
         return pd.DataFrame()
 
     if kesintiler_df is None or kesintiler_df.empty:
@@ -65,24 +45,19 @@ def match_sahalar_with_kesintiler(sahalar_df: pd.DataFrame, kesintiler_df: pd.Da
 
     for _, saha in sahalar_df.iterrows():
         saha_id = str(saha.get("Saha ID", "")).strip()
-        saha_lat = saha.get("Latitude", "")
-        saha_lon = saha.get("Longitude", "")
         saha_ilce = str(saha.get("İlçe", "")).strip().lower()
-
-        if not saha_ilce and saha_lat and saha_lon:
-            saha_ilce = _estimate_district_from_coords(saha_lat, saha_lon)
 
         for _, kesinti in kesintiler_df.iterrows():
             is_match = False
             k_metin = str(kesinti.to_dict()).lower()
 
-            # 1. Saha ID Arama
+            # 1. Saha ID ile doğrudan eşleşme
             if saha_id and len(saha_id) > 2 and (saha_id.lower() in k_metin):
                 is_match = True
-            # 2. İlçe Arama
+            # 2. İlçe ismi üzerinden eşleşme
             elif saha_ilce and (saha_ilce in k_metin):
                 is_match = True
-            # 3. Genel Eşleşme (Samsun/Amasya/Ordu sahalarının gösterilmesi için)
+            # 3. Genel bölge eşleşmesi
             elif any(x in k_metin for x in ["samsun", "amasya", "ordu", "bakım", "çalışma"]):
                 is_match = True
 
@@ -98,7 +73,7 @@ def match_sahalar_with_kesintiler(sahalar_df: pd.DataFrame, kesintiler_df: pd.Da
 
 
 def filter_by_period(df: pd.DataFrame, period_label: str) -> pd.DataFrame:
-    """Zaman filtresi."""
+    """Tarih / Dönem filtresi."""
     if df is None or df.empty:
         return pd.DataFrame()
     return df
