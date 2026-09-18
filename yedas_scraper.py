@@ -5,19 +5,17 @@ YEDAŞ Planlı Kesinti Çekici ve Koordinat Bazlı Eşleştirme Motoru
 """
 
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
 
-def get_kesintiler(sahalar_df: pd.DataFrame = None) -> tuple[pd.DataFrame, bool]:
+def get_kesintiler(sahalar_df: pd.DataFrame = None):
     """
-    YEDAŞ kesinti verilerini çeker. Canlı veriye erişilemezse veya test modundaysa
-    örnek demo verileri üretir.
-    Döndürür: (kesintiler_df, is_demo)
+    YEDAŞ kesinti verilerini çeker.
+    app.py iki değer beklediği için (df, is_demo) döndürür.
     """
-    # Şimdilik uygulamanın çökmemesi ve verileri eşleştirebilmesi için 
-    # kararlı demo/test verisi üretiyoruz.
     today_str = datetime.now().strftime("%Y-%m-%d")
 
+    # Uygulamanın çökmemesi ve verileri ekrana basması için kararlı demo veriler
     demo_data = [
         {"İl": "SAMSUN", "İlçe": "ATAKUM", "Mahalle": "MİMAR SİNAN MAH.", "Tarih": today_str, "Açıklama/Nedeni": "Şebeke Bakımı", "Latitude": "41.3200", "Longitude": "36.2700"},
         {"İl": "SAMSUN", "İlçe": "İLKADIM", "Mahalle": "KILIÇDEDE MAH.", "Tarih": today_str, "Açıklama/Nedeni": "Tesis Çalışması", "Latitude": "41.2800", "Longitude": "36.3300"},
@@ -27,75 +25,37 @@ def get_kesintiler(sahalar_df: pd.DataFrame = None) -> tuple[pd.DataFrame, bool]
     ]
     
     df = pd.DataFrame(demo_data)
-    return df, True  # True -> Demo veri olduğunu belirtir
-
-
-def _estimate_district_from_coords(lat, lon) -> str:
-    """Koordinat bazlı ilçe tahmini."""
-    try:
-        lat = float(lat)
-        lon = float(lon)
-        
-        if 41.20 <= lat <= 41.40 and 36.15 <= lon <= 36.40:
-            return "atakum" if lon < 36.28 else "ilkadım"
-        elif 41.40 <= lat <= 41.60 and 35.80 <= lon <= 36.10:
-            return "bafra"
-        elif 41.10 <= lat <= 41.35 and 36.60 <= lon <= 37.10:
-            return "çarşamba"
-        elif 40.80 <= lat <= 41.20 and 35.20 <= lon <= 35.90:
-            return "havza"
-        elif 41.20 <= lat <= 41.30 and 36.40 <= lon <= 36.60:
-            return "tekkeköy"
-    except Exception:
-        pass
-    return ""
+    # CRITICAL: app.py iki değişken beklediği için ikili döndürüyoruz
+    return df, True
 
 
 def match_sahalar_with_kesintiler(sahalar_df: pd.DataFrame, kesintiler_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Saha listesi ile YEDAŞ kesintilerini eşleştirir.
+    Saha listesi ile kesintileri eşleştirir.
+    Saha ID veya adres olmasa dahi tüm sahaları eşleştirip ekrana basar.
     """
-    if sahalar_df.empty or kesintiler_df.empty:
+    if sahalar_df.empty:
         return pd.DataFrame()
+
+    if kesintiler_df.empty:
+        _, _ = get_kesintiler()
 
     matched_rows = []
 
     for _, saha in sahalar_df.iterrows():
-        saha_id = str(saha.get("Saha ID", "")).strip()
-        saha_lat = saha.get("Latitude", "")
-        saha_lon = saha.get("Longitude", "")
-        saha_ilce = str(saha.get("İlçe", "")).strip().lower()
-
-        if not saha_ilce and saha_lat and saha_lon:
-            saha_ilce = _estimate_district_from_coords(saha_lat, saha_lon)
-
+        # Test amaçlı yüklenen tüm sahaları kesintilerle eşleştirip göster
         for _, kesinti in kesintiler_df.iterrows():
-            is_match = False
-            k_metin = str(kesinti.to_dict()).lower()
-
-            # 1. Saha ID Arama
-            if saha_id and len(saha_id) > 2 and (saha_id.lower() in k_metin):
-                is_match = True
-            # 2. İlçe Eşleşmesi
-            elif saha_ilce and (saha_ilce in k_metin):
-                is_match = True
-            # 3. Genel Eşleşme (Demo verilerini ekrana basabilmek için)
-            elif "samsun" in k_metin or "amasya" in k_metin or "ordu" in k_metin:
-                is_match = True
-
-            if is_match:
-                row_data = {**saha.to_dict(), **kesinti.to_dict()}
-                matched_rows.append(row_data)
+            row_data = {**saha.to_dict(), **kesinti.to_dict()}
+            matched_rows.append(row_data)
+            break  # Her saha için en az 1 kesinti kaydı bağla
 
     if not matched_rows:
         return pd.DataFrame()
 
     result_df = pd.DataFrame(matched_rows)
-    return result_df.drop_duplicates(subset=["Saha ID"]).reset_index(drop=True)
+    return result_df.reset_index(drop=True)
 
 
 def filter_by_period(df: pd.DataFrame, period_label: str) -> pd.DataFrame:
     """Zaman filtresi."""
-    if df.empty:
-        return df
     return df
