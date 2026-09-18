@@ -8,9 +8,10 @@ YEDAŞ Planlı Kesinti Takip ve Saha Yönetim Uygulaması - Ana Streamlit Uygula
 
 Sayfalar:
     1) Dashboard         -> Özet KPI kartları + Plotly Grafikleri + Zaman filtreli kesinti tablosu + PDF/JPG export
-    2) Veri Yönetimi     -> Toplu CSV yükleme + tekil saha ekleme/güncelleme
+    2) Veri Yönetimi     -> Toplu CSV/Excel yükleme + KML/Açıklama formatı otomatik dönüştürme + tekil saha ekleme/güncelleme
 """
 
+import re
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -102,7 +103,7 @@ if page == "📊 Dashboard":
     st.write("")
 
     if sahalar_df.empty:
-        st.warning("⚠️ Henüz sisteme kayıtlı saha bulunmuyor. Lütfen önce **Veri Yönetimi** sayfasından saha ekleyin.")
+        st.warning("⚠️ Henüz sisteme kayıtlı saha bulunmuyor. Lütfen önce **Veri Yönetimi** sayfasından saha yükleyin.")
     else:
         # ---- Hızlı Zaman Filtreleri ----
         st.subheader("⏱️ Zaman Filtresi")
@@ -186,7 +187,6 @@ if page == "📊 Dashboard":
             g_col1, g_col2 = st.columns(2)
 
             with g_col1:
-                # İllere Göre Kesinti Dağılımı
                 il_counts = filtered_df["İl"].value_counts().reset_index()
                 il_counts.columns = ["İl", "Saha Sayısı"]
                 fig_il = px.bar(
@@ -201,7 +201,6 @@ if page == "📊 Dashboard":
                 st.plotly_chart(fig_il, use_container_width=True)
 
             with g_col2:
-                # Kesinti Nedenleri Dağılımı (Varsa)
                 reason_col = "Açıklama/Nedeni" if "Açıklama/Nedeni" in filtered_df.columns else "Neden"
                 if reason_col in filtered_df.columns:
                     reason_counts = filtered_df[reason_col].value_counts().reset_index()
@@ -252,17 +251,16 @@ if page == "📊 Dashboard":
 # ====================================================================
 elif page == "🗂️ Veri Yönetimi":
     st.markdown('<h1 class="header-title">🗂️ Saha Veri Yönetimi</h1>', unsafe_allow_html=True)
-    st.caption("Veritabanındaki saha listenizi buradan yönetebilir, toplu yükleme yapabilir veya tekil kayıtlar ekleyebilirsiniz.")
+    st.caption("Veritabanındaki saha listenizi buradan yönetebilir, Excel (.xlsx) / CSV dosyası yükleyebilir veya tekil kayıtlar ekleyebilirsiniz.")
     st.write("")
 
-    tab1, tab2, tab3 = st.tabs(["📤 Toplu Yükleme (CSV)", "✏️ Tekil Ekle / Güncelle", "📋 Kayıtlı Sahalar"])
+    tab1, tab2, tab3 = st.tabs(["📤 Toplu Yükleme (Excel / CSV)", "✏️ Tekil Ekle / Güncelle", "📋 Kayıtlı Sahalar"])
 
     # ---------------- TAB 1: TOPLU YÜKLEME ----------------
     with tab1:
-        st.subheader("Toplu CSV Yükleme")
+        st.subheader("Toplu Excel / CSV Yükleme")
         st.markdown(
-            "CSV dosyanızda şu sütunlar bulunmalıdır (sütun sırası önemli değildir): "
-            "`Saha ID`, `İl`, `İlçe`, `Mahalle`"
+            "Desteklenen Sütunlar: `Placemark Ad`, `Açıklama`, `Latitude`, `Longitude` **VEYA** `Saha ID`, `İl`, `İlçe`, `Mahalle`"
         )
 
         upload_mode = st.radio(
@@ -271,28 +269,43 @@ elif page == "🗂️ Veri Yönetimi":
             index=0,
         )
 
-        uploaded_file = st.file_uploader("CSV dosyası seçin", type=["csv"])
+        uploaded_file = st.file_uploader("Excel (.xlsx) veya CSV dosyası seçin", type=["xlsx", "xls", "csv"])
 
         if uploaded_file is not None:
             try:
-                new_df = pd.read_csv(uploaded_file, dtype=str, encoding="utf-8-sig")
-            except Exception:
-                uploaded_file.seek(0)
-                new_df = pd.read_csv(uploaded_file, dtype=str, encoding="latin5")
+                # Excel veya CSV Okuma
+                if uploaded_file.name.endswith(('.xlsx', '.xls')):
+                    new_df = pd.read_excel(uploaded_file, dtype=str)
+                else:
+                    try:
+                        new_df = pd.read_csv(uploaded_file, dtype=str, encoding="utf-8-sig")
+                    except Exception:
+                        uploaded_file.seek(0)
+                        new_df = pd.read_csv(uploaded_file, dtype=str, encoding="latin5")
 
-            st.write("Yüklenen dosyadan önizleme:")
-            st.dataframe(new_df.head(10), use_container_width=True, hide_index=True)
-            st.caption(f"Dosyada toplam {len(new_df)} satır bulundu.")
+                # KML/Excel Formatı Otomatik Dönüştürme (SITE_NO Ayrıştırma)
+                if 'Açıklama' in new_df.columns:
+                    new_df['Saha ID'] = new_df['Açıklama'].astype(str).str.extract(r'SITE_NO=\s*(\d+)')
+                
+                if 'Placemark Ad' in new_df.columns and 'Saha Adı' not in new_df.columns:
+                    new_df['Saha Adı'] = new_df['Placemark Ad']
 
-            mode = "replace" if upload_mode.startswith("Mevcut veri tabanını sıfırla") else "append_update"
+                st.write("Yüklenen dosyadan işlenmiş önizleme:")
+                st.dataframe(new_df.head(10), use_container_width=True, hide_index=True)
+                st.caption(f"Dosyada toplam {len(new_df)} satır bulundu.")
 
-            if mode == "replace":
-                st.error("⚠️ Bu işlem mevcut TÜM saha veri tabanını silip yenisiyle değiştirecektir!")
+                mode = "replace" if upload_mode.startswith("Mevcut veri tabanını sıfırla") else "append_update"
 
-            if st.button("✅ Yüklemeyi Onayla ve Kalıcı Kaydet", type="primary"):
-                result_df = dm.bulk_upload(new_df, mode=mode)
-                st.success(f"İşlem tamamlandı. Veriler diske kalıcı olarak kaydedildi. Sistemde şu an toplam {len(result_df)} saha kayıtlı.")
-                st.rerun()
+                if mode == "replace":
+                    st.error("⚠️ Bu işlem mevcut TÜM saha veri tabanını silip yenisiyle değiştirecektir!")
+
+                if st.button("✅ Yüklemeyi Onayla ve Kalıcı Kaydet", type="primary"):
+                    result_df = dm.bulk_upload(new_df, mode=mode)
+                    st.success(f"İşlem tamamlandı. Veriler diske kalıcı olarak kaydedildi. Sistemde şu an toplam {len(result_df)} saha kayıtlı.")
+                    st.rerun()
+
+            except Exception as e:
+                st.error(f"Dosya işlenirken bir hata oluştu: {e}")
 
     # ---------------- TAB 2: TEKİL EKLE / GÜNCELLE ----------------
     with tab2:
@@ -302,7 +315,7 @@ elif page == "🗂️ Veri Yönetimi":
         with st.form("tekil_saha_form", clear_on_submit=True):
             f_col1, f_col2 = st.columns(2)
             with f_col1:
-                saha_id = st.text_input("Saha ID *")
+                saha_id = st.text_input("Saha ID / Site No *")
                 il = st.text_input("İl *")
             with f_col2:
                 ilce = st.text_input("İlçe *")
@@ -311,8 +324,8 @@ elif page == "🗂️ Veri Yönetimi":
             submitted = st.form_submit_button("💾 Kaydet / Güncelle", type="primary")
 
             if submitted:
-                if not saha_id.strip() or not il.strip() or not ilce.strip() or not mahalle.strip():
-                    st.error("Lütfen tüm alanları doldurun.")
+                if not saha_id.strip():
+                    st.error("Lütfen Saha ID alanını doldurun.")
                 else:
                     dm.add_or_update_saha(saha_id, il, ilce, mahalle)
                     st.success(f"'{saha_id}' kodlu saha başarıyla kaydedildi/güncellendi.")
@@ -323,7 +336,7 @@ elif page == "🗂️ Veri Yönetimi":
         st.subheader("Sistemde Kayıtlı Tüm Sahalar")
         current_df = dm.load_sahalar()
 
-        search_term = st.text_input("🔍 Ara (Saha ID, İl, İlçe veya Mahalle)")
+        search_term = st.text_input("🔍 Ara (Saha ID, Saha Adı, İl, İlçe veya Mahalle)")
         display_df = current_df
         if search_term.strip() and not current_df.empty:
             mask = current_df.apply(lambda row: row.astype(str).str.contains(search_term, case=False).any(), axis=1)
@@ -333,12 +346,12 @@ elif page == "🗂️ Veri Yönetimi":
         st.caption(f"Gösterilen: {len(display_df)} / Toplam: {len(current_df)} saha")
 
         # Silme işlemi
-        if not current_df.empty:
+        if not current_df.empty and "Saha ID" in current_df.columns:
             st.markdown("---")
             st.markdown("**Kayıt Sil**")
             del_col1, del_col2 = st.columns([3, 1])
             with del_col1:
-                saha_to_delete = st.selectbox("Silinecek Saha ID", options=current_df["Saha ID"].tolist())
+                saha_to_delete = st.selectbox("Silinecek Saha ID", options=current_df["Saha ID"].dropna().unique().tolist())
             with del_col2:
                 st.write("")
                 st.write("")
@@ -347,7 +360,7 @@ elif page == "🗂️ Veri Yönetimi":
                     st.success(f"'{saha_to_delete}' silindi.")
                     st.rerun()
 
-        # Mevcut veriyi CSV olarak dışa aktarma imkanı (yedekleme amaçlı)
+        # Mevcut veriyi CSV olarak dışa aktarma imkanı
         st.download_button(
             "⬇️ Tüm Saha Verisini CSV Olarak İndir (Yedek)",
             data=current_df.to_csv(index=False, encoding="utf-8-sig"),
