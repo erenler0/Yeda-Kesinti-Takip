@@ -14,8 +14,7 @@ from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 SAHA_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sahalar.csv")
 COLUMNS = ["Saha ID", "Latitude", "Longitude", "İl", "İlçe", "Mahalle"]
 
-# Nominatim (OpenStreetMap) Adres Çözücü Başlatma
-geolocator = Nominatim(user_agent="yedas_gsm_tracker")
+geolocator = Nominatim(user_agent="yedas_gsm_tracker_v2")
 
 
 def _clean_text(x) -> str:
@@ -25,85 +24,66 @@ def _clean_text(x) -> str:
 
 
 def get_address_from_coords(lat: str, lon: str) -> tuple:
-    """Koordinatlardan İl, İlçe ve Mahalle bilgisini otomatik çeker."""
+    """Koordinatlardan İl, İlçe ve Mahalle bilgisini çeker."""
     try:
         if not lat or not lon:
             return "", "", ""
         
-        # Koordinatı sorgula
         location = geolocator.reverse((lat, lon), timeout=5, language="tr")
         if not location:
             return "", "", ""
 
         address = location.raw.get("address", {})
         
-        # Türkiye adres yapısına göre ayrıştırma
         il = address.get("province") or address.get("state") or address.get("city", "")
         ilce = address.get("town") or address.get("district") or address.get("county") or address.get("suburb", "")
         mahalle = address.get("neighbourhood") or address.get("quarter") or address.get("village") or address.get("suburb", "")
 
         return _clean_text(il), _clean_text(ilce), _clean_text(mahalle)
-    except (GeocoderTimedOut, GeocoderServiceError, Exception):
+    except Exception:
         return "", "", ""
-
-
-def enrich_missing_addresses(df: pd.DataFrame) -> pd.DataFrame:
-    """İl/İlçe/Mahalle bilgisi boş olan sahaların koordinatlarından adreslerini tamamlar."""
-    if df.empty:
-        return df
-
-    updated = False
-    for idx, row in df.iterrows():
-        # Eğer İl veya İlçe bilgisi boşsa ve Koordinatlar varsa adres sorgula
-        if (not _clean_text(row.get("İl")) or not _clean_text(row.get("İlçe"))) and _clean_text(row.get("Latitude")) and _clean_text(row.get("Longitude")):
-            il, ilce, mahalle = get_address_from_coords(row["Latitude"], row["Longitude"])
-            
-            if il:
-                df.at[idx, "İl"] = il
-            if ilce:
-                df.at[idx, "İlçe"] = ilce
-            if mahalle:
-                df.at[idx, "Mahalle"] = mahalle
-            
-            updated = True
-            time.sleep(0.5)  # API hız limitine takılmamak için hafif bekleme
-
-    return df
 
 
 def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=COLUMNS)
 
-    # KML/Açıklama içerisinden SITE_NO ayıklama
+    # 1. KML veya Açıklama metninden SITE_NO çıkarma
     if "Açıklama" in df.columns or "Description" in df.columns:
         desc_col = "Açıklama" if "Açıklama" in df.columns else "Description"
         site_ids = df[desc_col].astype(str).str.extract(r'SITE_NO=\s*(\d+)')
         if 0 in site_ids.columns and not site_ids[0].isnull().all():
             df["Saha ID"] = site_ids[0]
 
-    # Sütun İsimlerini Eşleme
+    # 2. Esnek Sütun Eşleme (Olası tüm sütun isimleri)
     rename_map = {}
     for col in df.columns:
         c_clean = str(col).strip().lower()
-        if c_clean in ["saha id", "site_no", "site no", "saha_id", "id", "kodu"]:
+        
+        # Saha ID
+        if c_clean in ["saha id", "site_no", "site no", "saha_id", "id", "kodu", "placemark ad", "name"]:
             rename_map[col] = "Saha ID"
-        elif c_clean in ["latitude", "lat", "enlem", "y"]:
+        # Latitude (Enlem)
+        elif c_clean in ["latitude", "lat", "enlem", "y", "y_coord", "lat_coord"]:
             rename_map[col] = "Latitude"
-        elif c_clean in ["longitude", "long", "lng", "boylam", "x"]:
+        # Longitude (Boylam)
+        elif c_clean in ["longitude", "long", "lng", "boylam", "x", "x_coord", "long_coord"]:
             rename_map[col] = "Longitude"
-        elif c_clean in ["il", "sehir", "şehir"]:
+        # İl / İlçe / Mahalle
+        elif c_clean in ["il", "sehir", "şehir", "province", "city"]:
             rename_map[col] = "İl"
-        elif c_clean in ["ilce", "ilçe"]:
+        elif c_clean in ["ilce", "ilçe", "district", "town"]:
             rename_map[col] = "İlçe"
-        elif c_clean in ["mahalle", "mah"]:
+        elif c_clean in ["mahalle", "mah", "neighbourhood"]:
             rename_map[col] = "Mahalle"
 
     df = df.rename(columns=rename_map)
 
+    # Saha ID yoksa ilk sütunu al
     if "Saha ID" not in df.columns or df["Saha ID"].isnull().all():
         df["Saha ID"] = df.iloc[:, 0]
 
+    # Eksik sütunları ekle
     for col in COLUMNS:
         if col not in df.columns:
             df[col] = ""
@@ -134,7 +114,7 @@ def save_sahalar(df: pd.DataFrame) -> None:
 
 
 def bulk_upload(file_or_df, mode: str = "replace") -> pd.DataFrame:
-    """Excel veya CSV dosyasını yükler, koordinatlardan adresleri doldurur ve kaydeder."""
+    """Excel veya CSV dosyasını okur ve yükler."""
     if isinstance(file_or_df, pd.DataFrame):
         new_df = file_or_df
     else:
@@ -151,9 +131,16 @@ def bulk_upload(file_or_df, mode: str = "replace") -> pd.DataFrame:
             new_df = pd.read_csv(io.StringIO(content), sep=sep, dtype=str)
 
     normalized_df = _normalize_df(new_df)
-    
-    # Adresleri koordinattan otomatik tamamlama
-    normalized_df = enrich_missing_addresses(normalized_df)
+
+    # Sadece koordinat varsa adres bulmayı dene
+    for idx, row in normalized_df.iterrows():
+        lat, lon = row["Latitude"], row["Longitude"]
+        if lat and lon and (not row["İl"] or not row["İlçe"]):
+            il, ilce, mah = get_address_from_coords(lat, lon)
+            if il: normalized_df.at[idx, "İl"] = il
+            if ilce: normalized_df.at[idx, "İlçe"] = ilce
+            if mah: normalized_df.at[idx, "Mahalle"] = mah
+            time.sleep(0.3)
 
     if mode == "replace":
         final_df = normalized_df
@@ -167,14 +154,6 @@ def bulk_upload(file_or_df, mode: str = "replace") -> pd.DataFrame:
 
 def add_or_update_saha(saha_id: str, il: str, ilce: str, mahalle: str, lat: str = "", lon: str = ""):
     current_df = load_sahalar()
-    
-    # Manuel girilen adreste eksik varsa koordinattan bulmayı dene
-    if (not il or not ilce) and lat and lon:
-        auto_il, auto_ilce, auto_mah = get_address_from_coords(lat, lon)
-        il = il or auto_il
-        ilce = ilce or auto_ilce
-        mahalle = mahalle or auto_mah
-
     new_row = pd.DataFrame([{
         "Saha ID": _clean_text(saha_id),
         "Latitude": _clean_text(lat),
@@ -183,10 +162,8 @@ def add_or_update_saha(saha_id: str, il: str, ilce: str, mahalle: str, lat: str 
         "İlçe": _clean_text(ilce),
         "Mahalle": _clean_text(mahalle)
     }])
-
     if not current_df.empty:
         current_df = current_df[current_df["Saha ID"] != _clean_text(saha_id)]
-    
     updated_df = pd.concat([current_df, new_row], ignore_index=True)
     save_sahalar(updated_df)
 
